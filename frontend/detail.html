@@ -1,0 +1,501 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+<link rel="icon" href="data:,">
+<title>X1.0 Detail</title>
+<link rel="manifest" href="/manifest.webmanifest"/>
+<meta name="theme-color" content="#0b0d12"/>
+
+<script src="https://unpkg.com/vue@3.4.21/dist/vue.global.prod.js"></script>
+<script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: #0b0d12; color: #e6e6e6;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-tap-highlight-color: transparent;
+  }
+  [v-cloak] { display: none; }
+
+  .topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 14px; border-bottom: 1px solid #1c2030;
+    position: sticky; top: 0; background: #0b0d12; z-index: 10;
+  }
+  .topbar .back { color: #58a6ff; text-decoration: none; font-size: 15px; }
+  .topbar .title { font-weight: 600; font-size: 16px; }
+  .topbar .source { font-size: 12px; color: #8a93a6; }
+
+  .pricebox { padding: 12px 16px; border-bottom: 1px solid #1c2030; }
+  .pricebox .row1 { display: flex; align-items: baseline; gap: 10px; }
+  .pricebox .last { font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .pricebox .chg  { font-size: 15px; }
+  .pricebox .up   { color: #28c76f; }
+  .pricebox .down { color: #ea5455; }
+  .pricebox .meta { margin-top: 6px; font-size: 12px; color: #8a93a6; font-variant-numeric: tabular-nums; }
+
+  .tfs {
+    display: flex; gap: 6px; padding: 8px 12px;
+    overflow-x: auto; border-bottom: 1px solid #1c2030;
+    scrollbar-width: none;
+  }
+  .tfs::-webkit-scrollbar { display: none; }
+  .tfs button {
+    flex: 0 0 auto;
+    background: #1a1f2e; color: #c9d1d9;
+    border: 1px solid #2d3347; border-radius: 6px;
+    padding: 6px 12px; font-size: 13px;
+    cursor: pointer; transition: all 0.15s;
+  }
+  .tfs button:hover { background: #222839; }
+  .tfs button.active { background: #1f6feb; border-color: #1f6feb; color: #fff; }
+
+  #chartWrap { position: relative; width: 100%; height: 62vh; min-height: 340px; }
+  #chart { width: 100%; height: 100%; }
+
+  .legend {
+    display: flex; flex-wrap: wrap; gap: 12px;
+    padding: 8px 16px; font-size: 12px; color: #8a93a6;
+    border-top: 1px solid #1c2030;
+  }
+  .legend .item { display: flex; align-items: center; gap: 4px; }
+  .legend .dot { width: 8px; height: 8px; border-radius: 50%; }
+  .legend .line { width: 14px; height: 2px; }
+
+  .infopanel { padding: 12px 16px; border-top: 1px solid #1c2030; }
+  .infopanel .row { display: flex; justify-content: space-between; padding: 6px 0; font-size: 14px; }
+  .infopanel .label { color: #8a93a6; }
+  .infopanel .val { font-variant-numeric: tabular-nums; }
+  .infopanel .tag { padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; }
+  .tag.B { background: #163d23; color: #3fb950; }
+  .tag.S { background: #3d1616; color: #f85149; }
+  .tag.N { background: #2d3347; color: #c9d1d9; }
+  .tag.UP    { background: #163d23; color: #3fb950; }
+  .tag.DOWN  { background: #3d1616; color: #f85149; }
+  .tag.RANGE { background: #3a3116; color: #d29922; }
+  .tag.UNKNOWN { background: #2d3347; color: #8a93a6; }
+
+  .bottomnav {
+    position: sticky; bottom: 0;
+    display: flex; border-top: 1px solid #1c2030;
+    background: #0b0d12; z-index: 10;
+  }
+  .bottomnav a {
+    flex: 1; text-align: center; padding: 10px 0;
+    color: #8a93a6; text-decoration: none; font-size: 12px;
+  }
+  .bottomnav a.active { color: #58a6ff; }
+
+  .loading {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    color: #8a93a6; font-size: 14px;
+  }
+</style>
+</head>
+<body>
+<div id="app" v-cloak>
+
+  <div class="topbar">
+    <a class="back" href="/">← 返回</a>
+    <div class="title">{{ symbol }}</div>
+    <div class="source">{{ sourceLabel }}</div>
+  </div>
+
+  <div class="pricebox">
+    <div class="row1">
+      <div class="last">{{ fmt(lastPrice) }}</div>
+      <div class="chg" :class="chgClass">{{ chgText }}</div>
+    </div>
+    <div class="meta" v-if="lastCandle">
+      最新 {{ tf }} 开 {{ fmt(lastCandle.open) }} 高 {{ fmt(lastCandle.high) }} 低 {{ fmt(lastCandle.low) }} 收 {{ fmt(lastCandle.close) }}
+    </div>
+  </div>
+
+  <div class="tfs">
+    <button v-for="t in timeframes" :key="t"
+            :class="{active: t === tf}"
+            @click="switchTf(t)">{{ t }}</button>
+  </div>
+
+  <div id="chartWrap">
+    <div id="chart"></div>
+    <div v-if="loading" class="loading">加载中…</div>
+  </div>
+
+  <div class="legend">
+    <div class="item"><span class="dot" style="background:#f85149"></span>顶分型</div>
+    <div class="item"><span class="dot" style="background:#3fb950"></span>底分型</div>
+    <div class="item"><span class="line" style="background:#d29922"></span>笔</div>
+    <div class="item"><span class="line" style="background:#bc8cff"></span>线段</div>
+    <div class="item"><span class="line" style="background:#58a6ff"></span>中枢</div>
+    <div class="item"><span class="dot" style="background:#28c76f"></span>买点</div>
+    <div class="item"><span class="dot" style="background:#ea5455"></span>卖点</div>
+  </div>
+
+  <div class="infopanel">
+    <div class="row">
+      <span class="label">缠论结构</span>
+      <span class="val">
+        <span class="tag" :class="trendTagClass">{{ trendText }}</span>
+      </span>
+    </div>
+    <div class="row" v-if="lastCenter">
+      <span class="label">中枢（笔）</span>
+      <span class="val">{{ fmt(lastCenter.zd) }} ~ {{ fmt(lastCenter.zg) }}</span>
+    </div>
+    <div class="row" v-if="lastSegmentCenter">
+      <span class="label">中枢（线段）</span>
+      <span class="val">{{ fmt(lastSegmentCenter.zd) }} ~ {{ fmt(lastSegmentCenter.zg) }}</span>
+    </div>
+    <div class="row">
+      <span class="label">当前信号</span>
+      <span class="val">
+        <span v-if="signal" class="tag" :class="signalTagClass">{{ signal.type }} · {{ signal.score }}</span>
+        <span v-else class="tag N">观望</span>
+      </span>
+    </div>
+    <div class="row" v-if="signal && signal.reason">
+      <span class="label">理由</span>
+      <span class="val" style="font-size:12px;color:#8a93a6">{{ signal.reason }}</span>
+    </div>
+  </div>
+
+  <div class="bottomnav">
+    <a href="/">首页</a>
+    <a href="/market.html">行情</a>
+    <a href="/signals.html">信号</a>
+    <a href="/alerts.html">提醒</a>
+    <a href="/settings.html">设置</a>
+  </div>
+
+</div>
+
+<script>
+const { createApp, ref, computed, onMounted } = Vue;
+
+createApp({
+  setup() {
+    const params = new URLSearchParams(location.search);
+    const symbol = ref(params.get("symbol") || "BTC/USDT");
+    const tf = ref(params.get("tf") || "15m");
+
+    const timeframes = ["1m", "5m", "15m", "30m", "1h", "4h", "1d"];
+    const lastPrice  = ref(0);
+    const prevPrice  = ref(0);
+    const lastCandle = ref(null);
+    const sourceLabel = ref("");
+    const loading = ref(false);
+    const trend = ref("UNKNOWN");
+    const signal = ref(null);
+    const lastCenter = ref(null);
+    const lastSegmentCenter = ref(null);
+
+    let chart = null;
+    let klineSeries = null;
+    let volumeSeries = null;
+    let biSeries = null;
+    let segSeries = null;
+    let centerSeries = [];
+
+    function fmt(v) {
+      if (v == null) return "--";
+      const n = Number(v);
+      if (!isFinite(n)) return "--";
+      if (Math.abs(n) >= 1000) return n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+      if (Math.abs(n) >= 1)    return n.toFixed(2);
+      return n.toFixed(4);
+    }
+
+    const chgClass = computed(() => lastPrice.value >= prevPrice.value ? "up" : "down");
+    const chgText  = computed(() => {
+      if (!prevPrice.value) return "";
+      const pct = (lastPrice.value - prevPrice.value) / prevPrice.value * 100;
+      return (pct >= 0 ? "+" : "") + pct.toFixed(2) + "%";
+    });
+
+    const trendText = computed(() => ({
+      UP: "上涨", DOWN: "下跌", RANGE: "盘整"
+    }[trend.value] || "未知"));
+
+    const trendTagClass = computed(() => trend.value);
+    const signalTagClass = computed(() => {
+      if (!signal.value) return "N";
+      return signal.value.type.startsWith("B") ? "B" : "S";
+    });
+
+    function initChart() {
+      const el = document.getElementById("chart");
+      chart = LightweightCharts.createChart(el, {
+        layout: { background: { color: "#0b0d12" }, textColor: "#c9d1d9" },
+        grid: {
+          vertLines: { color: "#161a24" },
+          horzLines: { color: "#161a24" },
+        },
+        crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+        rightPriceScale: { borderColor: "#1c2030", scaleMargins: { top: 0.05, bottom: 0.25 } },
+        timeScale: { borderColor: "#1c2030", timeVisible: true, secondsVisible: false },
+        handleScroll: { mouseWheel: true, pressedMouseMove: true },
+        handleScale: { mouseWheel: true, pinch: true },
+      });
+
+      klineSeries = chart.addCandlestickSeries({
+        upColor: "#28c76f", downColor: "#ea5455",
+        wickUpColor: "#28c76f", wickDownColor: "#ea5455",
+        borderVisible: false,
+      });
+
+      volumeSeries = chart.addHistogramSeries({
+        priceFormat: { type: "volume" },
+        priceScaleId: "vol",
+        color: "#3b82f6",
+      });
+      chart.priceScale("vol").applyOptions({
+        scaleMargins: { top: 0.8, bottom: 0 },
+      });
+
+      const resize = () => {
+        const wrap = document.getElementById("chartWrap");
+        chart.applyOptions({ width: wrap.clientWidth, height: wrap.clientHeight });
+      };
+      resize();
+      window.addEventListener("resize", resize);
+    }
+
+    async function loadCandles() {
+      loading.value = true;
+      try {
+        const url = `/api/candles/${encodeURIComponent(symbol.value)}?timeframe=${tf.value}&limit=300`;
+        const r = await fetch(url);
+        if (!r.ok) throw new Error(`candles HTTP ${r.status}`);
+        const payload = await r.json();
+        const rows = payload.candles || [];
+
+        const candles = rows.map(c => ({
+          time: c.t, open: c.o, high: c.h, low: c.l, close: c.c,
+        }));
+        const vols = rows.map(c => ({
+          time: c.t, value: c.v,
+          color: c.c >= c.o ? "rgba(40,199,111,0.4)" : "rgba(234,84,85,0.4)",
+        }));
+
+        klineSeries.setData(candles);
+        volumeSeries.setData(vols);
+
+        if (rows.length > 0) {
+          const last = rows[rows.length - 1];
+          lastCandle.value = {
+            time: last.t, open: last.o, high: last.h, low: last.l, close: last.c,
+          };
+          lastPrice.value = last.c;
+          prevPrice.value = rows.length > 1 ? rows[rows.length - 2].c : last.c;
+        }
+      } catch (e) {
+        console.error("[candles] error", e);
+      } finally {
+        loading.value = false;
+      }
+    }
+
+    async function loadPlot() {
+      try {
+        const url = `/api/chan/plot?symbol=${encodeURIComponent(symbol.value)}&timeframe=${tf.value}&limit=300`;
+        const r = await fetch(url);
+        if (!r.ok) throw new Error(`plot HTTP ${r.status}`);
+        const d = await r.json();
+        console.log("[plot] response", d);
+        renderOverlay(d);
+      } catch (e) {
+        console.error("[plot] error", e);
+      }
+    }
+
+    function clearOverlay() {
+      if (biSeries)  { try { chart.removeSeries(biSeries);  } catch(e){} biSeries = null; }
+      if (segSeries) { try { chart.removeSeries(segSeries); } catch(e){} segSeries = null; }
+      centerSeries.forEach(s => { try { chart.removeSeries(s); } catch(e){} });
+      centerSeries = [];
+    }
+
+    function renderOverlay(d) {
+      clearOverlay();
+
+      const fractals = d.fractals || [];
+      const bis      = d.bis || [];
+      const segments = d.segments || [];
+      const centers  = d.segment_centers && d.segment_centers.length
+                         ? d.segment_centers
+                         : (d.centers || []);
+      const sig      = d.signal;
+
+      trend.value = d.trend || "UNKNOWN";
+      signal.value = sig || null;
+      lastCenter.value = (d.centers && d.centers.length) ? d.centers[d.centers.length - 1] : null;
+      lastSegmentCenter.value = (d.segment_centers && d.segment_centers.length)
+        ? d.segment_centers[d.segment_centers.length - 1]
+        : null;
+
+      // 1. markers：分型 + 买卖点
+      const markers = [];
+      fractals.forEach(f => {
+        if (f.time == null) return;
+        markers.push({
+          time: f.time,
+          position: f.kind === "top" ? "aboveBar" : "belowBar",
+          color: f.kind === "top" ? "#f85149" : "#3fb950",
+          shape: "circle",
+          size: 0.6,
+        });
+      });
+      if (sig && sig.time != null) {
+        const isBuy = sig.type.startsWith("B");
+        markers.push({
+          time: sig.time,
+          position: isBuy ? "belowBar" : "aboveBar",
+          color: isBuy ? "#28c76f" : "#ea5455",
+          shape: isBuy ? "arrowUp" : "arrowDown",
+          text: sig.type,
+          size: 1.5,
+        });
+      }
+      markers.sort((a, b) => a.time - b.time);
+      klineSeries.setMarkers(markers);
+
+      // 2. 笔（黄色折线）
+      if (bis.length > 0) {
+        biSeries = chart.addLineSeries({
+          color: "#d29922", lineWidth: 2,
+          priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+        });
+        const pts = [];
+        bis.forEach((b, i) => {
+          if (b.start_time == null || b.end_time == null) return;
+          if (i === 0) pts.push({ time: b.start_time, value: b.start_price });
+          pts.push({ time: b.end_time, value: b.end_price });
+        });
+        pts.sort((a, b) => a.time - b.time);
+        if (pts.length > 0) biSeries.setData(pts);
+      }
+
+      // 3. 线段（紫色，起点到终点直连）
+      if (segments.length > 0) {
+        segSeries = chart.addLineSeries({
+          color: "#bc8cff", lineWidth: 3,
+          priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+        });
+        const pts = [];
+        segments.forEach(s => {
+          if (s.start_time == null || s.end_time == null) return;
+          pts.push({ time: s.start_time, value: s.start_price });
+          pts.push({ time: s.end_time,   value: s.end_price });
+        });
+        pts.sort((a, b) => a.time - b.time);
+        if (pts.length > 0) segSeries.setData(pts);
+      }
+
+      // 4. 中枢（蓝色上下沿 + 中线）
+      centers.forEach(c => {
+        if (c.start_time == null || c.end_time == null) return;
+
+        const top = chart.addLineSeries({
+          color: "#58a6ff", lineWidth: 2, lineStyle: 0,
+          priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+        });
+        top.setData([
+          { time: c.start_time, value: c.zg },
+          { time: c.end_time,   value: c.zg },
+        ]);
+
+        const bot = chart.addLineSeries({
+          color: "#58a6ff", lineWidth: 2, lineStyle: 0,
+          priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+        });
+        bot.setData([
+          { time: c.start_time, value: c.zd },
+          { time: c.end_time,   value: c.zd },
+        ]);
+
+        const mid = chart.addLineSeries({
+          color: "#1f6feb", lineWidth: 1, lineStyle: 2,
+          priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+        });
+        mid.setData([
+          { time: c.start_time, value: c.mid },
+          { time: c.end_time,   value: c.mid },
+        ]);
+
+        centerSeries.push(top, bot, mid);
+      });
+    }
+
+    async function switchTf(t) {
+      tf.value = t;
+      await loadCandles();
+      await loadPlot();
+    }
+
+    function connectWS() {
+      const proto = location.protocol === "https:" ? "wss" : "ws";
+      const ws = new WebSocket(`${proto}://${location.host}/ws`);
+      ws.onopen = () => console.log("[ws] open");
+      ws.onclose = () => {
+        console.log("[ws] close, retry in 3s");
+        setTimeout(connectWS, 3000);
+      };
+      ws.onmessage = (ev) => {
+        try {
+          const msg = JSON.parse(ev.data);
+          if (msg.type === "ticker" && msg.symbol === symbol.value) {
+            const newPrice = parseFloat(msg.price);
+            if (!isFinite(newPrice)) return;
+            prevPrice.value = lastPrice.value || newPrice;
+            lastPrice.value = newPrice;
+            if (msg.source) sourceLabel.value = msg.source;
+
+            if (lastCandle.value) {
+              const c = { ...lastCandle.value };
+              c.close = newPrice;
+              c.high = Math.max(c.high, newPrice);
+              c.low  = Math.min(c.low,  newPrice);
+              lastCandle.value = c;
+              klineSeries.update({
+                time: c.time, open: c.open, high: c.high, low: c.low, close: c.close,
+              });
+            }
+          }
+        } catch (e) {}
+      };
+    }
+
+    onMounted(async () => {
+      initChart();
+      const forceResize = () => {
+        const wrap = document.getElementById("chartWrap");
+        if (chart && wrap) {
+          chart.applyOptions({ width: wrap.clientWidth, height: wrap.clientHeight });
+        }
+      };
+      setTimeout(forceResize, 100);
+      setTimeout(forceResize, 500);
+
+      await loadCandles();
+      await loadPlot();
+      connectWS();
+    });
+
+    return {
+      symbol, tf, timeframes,
+      lastPrice, prevPrice, lastCandle, sourceLabel,
+      loading, trend, signal, lastCenter, lastSegmentCenter,
+      chgClass, chgText, trendText, trendTagClass, signalTagClass,
+      fmt, switchTf,
+    };
+  }
+}).mount("#app");
+</script>
+</body>
+</html>

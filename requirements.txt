@@ -1,0 +1,12 @@
+fastapi
+uvicorn[standard]
+websockets
+httpx
+pydantic
+pydantic-settings
+pyyaml
+orjson
+numpy
+python-dotenv
+aiosqlite
+redis

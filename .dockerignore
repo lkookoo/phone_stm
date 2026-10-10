@@ -1,0 +1,38 @@
+.git
+.gitignore
+.venv
+venv
+__pycache__
+*.pyc
+*.pyo
+.pytest_cache
+
+# 环境变量（.env.hf 保留，因为 Dockerfile 要用它）
+.env
+.env.production
+.env.local
+
+# 数据文件
+data/
+*.db
+*.sqlite
+x1_data.db
+
+# 调试临时文件
+dbg.json
+active.json
+plot.json
+spx.json
+spx_plot.json
+chk.py
+dbg.py
+show.py
+clean.py
+yf.json
+yfchk.py
+yamlchk.py
+dbchk.py
+
+# 部署脚本（HF 不需要）
+deploy/
+docker-compose.yml

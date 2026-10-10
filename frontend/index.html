@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+<meta name="theme-color" content="#0d1117"/>
+<link rel="icon" href="data:,">
+<title>X1.0 Market Monitor</title>
+<link rel="manifest" href="/manifest.webmanifest"/>
+<link rel="apple-touch-icon" href="/icon-192.png"/>
+<script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+<style>
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Helvetica Neue",sans-serif;background:#0d1117;color:#e6edf3;}
+  .header{padding:14px 16px;background:#161b22;border-bottom:1px solid #30363d;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;z-index:10;}
+  .header h1{font-size:15px;margin:0;letter-spacing:1px;}
+  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#3fb950;margin-right:6px;}
+  .dot.red{background:#f85149;}
+  .dot.gray{background:#8b949e;}
+  .card{background:#161b22;border:1px solid #30363d;border-radius:10px;margin:10px;padding:10px 14px;}
+  .row{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #21262d;}
+  .row:last-child{border-bottom:none;}
+  .row.clickable{cursor:pointer;}
+  .row.clickable:active{background:#21262d;}
+  .sym{font-weight:600;}
+  .price{font-variant-numeric:tabular-nums;font-weight:600;}
+  .up{color:#3fb950;} .down{color:#f85149;}
+  .sig{display:inline-block;padding:2px 8px;border-radius:6px;font-size:12px;font-weight:600;}
+  .sig.B1,.sig.B2,.sig.B3{background:#1f6feb33;color:#58a6ff;}
+  .sig.S1,.sig.S2,.sig.S3{background:#f8514933;color:#f85149;}
+  .tag{font-size:12px;color:#8b949e;}
+  .nav{position:fixed;bottom:0;left:0;right:0;display:flex;background:#161b22;border-top:1px solid #30363d;padding:8px 0;padding-bottom:calc(8px + env(safe-area-inset-bottom));z-index:20;}
+  .nav div{flex:1;text-align:center;font-size:12px;color:#8b949e;cursor:pointer;padding:4px 0;}
+  .nav div.active{color:#58a6ff;}
+  .section{margin:14px 10px 6px;font-size:13px;color:#8b949e;letter-spacing:1px;}
+  .score{font-weight:700;color:#d29922;}
+  .center-box{font-size:12px;color:#8b949e;margin-top:4px;}
+  .arrow{color:#8b949e;font-size:14px;margin-left:8px;}
+  .reason{font-size:11px;color:#6e7681;margin-top:4px;line-height:1.4;}
+  .trend-pill{display:inline-block;padding:1px 6px;border-radius:4px;font-size:11px;margin-left:4px;}
+  .trend-pill.UP{background:#1f6feb33;color:#58a6ff;}
+  .trend-pill.DOWN{background:#f8514933;color:#f85149;}
+  .trend-pill.RANGE{background:#d2992233;color:#d29922;}
+  .empty{padding:16px 0;text-align:center;color:#6e7681;font-size:13px;}
+  .market-closed{display:inline-block;padding:2px 8px;border-radius:6px;background:#2d333b;color:#8b949e;font-size:11px;margin-left:6px;}
+</style>
+</head>
+<body>
+<div id="app">
+
+  <div class="header">
+    <h1>X1.0 MARKET MONITOR</h1>
+    <span class="tag"><span class="dot" :class="{red:!healthy}"></span>{{ clock }}</span>
+  </div>
+
+  <!-- 加密货币 -->
+  <div class="section">🔥 加密货币</div>
+  <div class="card">
+    <div class="row clickable" v-for="t in cryptoTickers" :key="t.symbol"
+         @click="goDetail(t.symbol)">
+      <span class="sym">{{ t.symbol }}</span>
+      <span>
+        <span class="price">{{ fmt(t.price) }}</span>
+        <span class="arrow">›</span>
+      </span>
+    </div>
+    <div class="row" v-if="cryptoTickers.length===0"><span class="tag">等待行情…</span></div>
+  </div>
+
+  <!-- 美股指数 -->
+  <div class="section">
+    🇺🇸 美股指数
+    <span v-if="!inUSSession && usTickers.length" class="market-closed">休市</span>
+  </div>
+  <div class="card">
+    <div class="row clickable" v-for="t in usTickers" :key="t.symbol"
+         @click="goDetail(t.symbol)">
+      <span class="sym">{{ t.symbol }}</span>
+      <span>
+        <span class="price">{{ fmt(t.price) }}</span>
+        <span class="arrow">›</span>
+      </span>
+    </div>
+    <div class="row" v-if="usTickers.length===0"><span class="tag">等待行情…</span></div>
+  </div>
+
+  <!-- 缠论信号 -->
+  <div class="section">📊 缠论信号</div>
+  <div class="card">
+    <div class="row clickable" v-for="s in signals" :key="s.symbol + ':' + s.timeframe"
+         @click="goDetail(s.symbol, s.timeframe)">
+      <div style="flex:1;min-width:0;">
+        <div>
+          <span class="sym">{{ s.symbol }}</span>
+          <span class="tag">{{ s.timeframe }}</span>
+          <span v-if="s.trend" class="trend-pill" :class="s.trend">{{ trendLabel(s.trend) }}</span>
+        </div>
+        <div class="center-box" v-if="s.center">
+          中枢 {{ fmt(s.center.zd) }} ~ {{ fmt(s.center.zg) }}
+        </div>
+        <div class="reason" v-if="s.reason">{{ s.reason }}</div>
+      </div>
+      <div style="text-align:right;flex-shrink:0;margin-left:8px;">
+        <div>
+          <span class="sig" :class="s.signal">{{ s.signal }}</span>
+        </div>
+        <div class="score" v-if="scoreOf(s)">{{ scoreOf(s) }}分</div>
+        <div class="tag" v-if="s.volume && s.volume.status">
+          {{ s.volume.status }} ×{{ s.volume.ratio }}
+        </div>
+        <div class="tag" v-if="relTime(s.trigger_ts)">{{ relTime(s.trigger_ts) }}</div>
+      </div>
+    </div>
+    <div class="empty" v-if="signals.length===0">当前无买卖点</div>
+  </div>
+
+  <!-- 数据源状态 -->
+  <div class="section">🔌 数据源</div>
+  <div class="card">
+    <div class="row" v-for="(h,k) in health" :key="k">
+      <span>{{ k }}</span>
+      <span>
+        <span class="dot" :class="{red: !h.online, gray: h.session === 'closed'}"></span>
+        <span class="tag">
+          {{ h.latency_ms }}ms
+          <span v-if="h.session === 'closed'"> · 休市</span>
+          <span v-else> · {{ h.score }}</span>
+        </span>
+      </span>
+    </div>
+    <div class="row" v-if="Object.keys(health).length===0"><span class="tag">检测中…</span></div>
+  </div>
+
+  <div style="height:80px"></div>
+
+  <div class="nav">
+    <div class="active">首页</div>
+    <div>行情</div>
+    <div>信号</div>
+    <div>提醒</div>
+    <div>设置</div>
+  </div>
+</div>
+
+<script>
+const { createApp, ref, onMounted, computed } = Vue;
+
+createApp({
+  setup() {
+    const tickers = ref([]);
+    const signals = ref([]);
+    const health = ref({});
+    const clock = ref("--:--:--");
+    const usSessionNow = ref(true);
+
+    const healthy = computed(() => {
+      const vals = Object.values(health.value);
+      return vals.length === 0 || vals.every(h => h.online);
+    });
+
+    const cryptoTickers = computed(() =>
+      tickers.value.filter(t => t.asset_class !== "us_index")
+    );
+
+    const usTickers = computed(() =>
+      tickers.value.filter(t => t.asset_class === "us_index")
+    );
+
+    const inUSSession = computed(() => usSessionNow.value);
+
+    const fmt = (n) => n == null ? "-" : Number(n).toLocaleString(undefined, {maximumFractionDigits: 2});
+
+    const scoreOf = (s) => {
+      if (!s || !s.score) return 0;
+      if (typeof s.score === "number") return s.score;
+      return s.score.total || 0;
+    };
+
+    const trendLabel = (t) => ({
+      UP: "↑", DOWN: "↓", RANGE: "→", UNKNOWN: "?"
+    }[t] || t);
+
+    function relTime(ts) {
+      if (!ts) return "";
+      let ms;
+      try {
+        ms = typeof ts === "number" ? ts : Date.parse(ts);
+      } catch(e) { return ""; }
+      if (!ms || isNaN(ms)) return "";
+      const sec = Math.floor((Date.now() - ms) / 1000);
+      if (sec < 0) return "";
+      if (sec < 60) return sec + "秒前";
+      if (sec < 3600) return Math.floor(sec / 60) + "分钟前";
+      if (sec < 86400) return Math.floor(sec / 3600) + "小时前";
+      return Math.floor(sec / 86400) + "天前";
+    }
+
+    function goDetail(symbol, timeframe) {
+      const tf = timeframe || "15m";
+      location.href = `/detail.html?symbol=${encodeURIComponent(symbol)}&tf=${tf}`;
+    }
+
+    function tickClock() {
+      clock.value = new Date().toTimeString().slice(0,8);
+      const now = new Date();
+      const et = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
+      const day = et.getDay();
+      if (day === 0 || day === 6) { usSessionNow.value = false; return; }
+      const h = et.getHours();
+      const m = et.getMinutes();
+      usSessionNow.value = (h > 9 || (h === 9 && m >= 30)) && h < 16;
+    }
+
+    async function pollOverview() {
+      try {
+        const r = await fetch("/api/market/overview");
+        const j = await r.json();
+        tickers.value = (j.ticks || []).sort((a,b)=>a.symbol.localeCompare(b.symbol));
+        health.value = j.health || {};
+      } catch(e) {}
+    }
+
+    async function pollSignals() {
+      try {
+        const r = await fetch("/api/signals/active");
+        const j = await r.json();
+        signals.value = j.signals || [];
+      } catch(e) {}
+    }
+
+    function connectWS() {
+      const proto = location.protocol === "https:" ? "wss" : "ws";
+      const ws = new WebSocket(`${proto}://${location.host}/ws`);
+      ws.onmessage = (ev) => {
+        let msg;
+        try { msg = JSON.parse(ev.data); } catch(e) { return; }
+
+        if (msg.type === "ticker") {
+          const i = tickers.value.findIndex(t => t.symbol === msg.symbol);
+          if (i >= 0) tickers.value[i] = { ...tickers.value[i], ...msg };
+          else tickers.value.push(msg);
+          tickers.value.sort((a,b)=>a.symbol.localeCompare(b.symbol));
+        } else if (msg.type === "chan_signal") {
+          const item = {
+            symbol: msg.symbol,
+            timeframe: msg.timeframe,
+            signal: msg.signal,
+            score: { total: msg.score },
+            price: msg.price,
+            trend: msg.trend,
+            volume: { status: msg.volume_status },
+            trigger_ts: msg.trigger_ts,
+            reason: msg.reason,
+            center: msg.center,
+          };
+          const i = signals.value.findIndex(
+            s => s.symbol===msg.symbol && s.timeframe===msg.timeframe
+          );
+          if (i >= 0) signals.value[i] = item;
+          else signals.value.unshift(item);
+
+          if (window.Notification && Notification.permission === "granted") {
+            try {
+              new Notification(`X1.0 ${msg.symbol} ${msg.timeframe} ${msg.signal}`,
+                { body: `价格 ${msg.price} · 评分 ${msg.score}` });
+            } catch(e) {}
+          }
+        }
+      };
+      ws.onclose = () => setTimeout(connectWS, 3000);
+      ws.onerror = () => {};
+    }
+
+    onMounted(() => {
+      tickClock();
+      setInterval(tickClock, 1000);
+
+      pollOverview();
+      setInterval(pollOverview, 5000);
+
+      pollSignals();
+      setInterval(pollSignals, 30000);
+
+      if (window.Notification && Notification.permission === "default") {
+        Notification.requestPermission();
+      }
+      connectWS();
+    });
+
+    return {
+      tickers, signals, health, clock, healthy,
+      cryptoTickers, usTickers, inUSSession,
+      fmt, scoreOf, trendLabel, relTime, goDetail,
+    };
+  }
+}).mount("#app");
+</script>
+
+<!-- PWA Service Worker 注册 -->
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/sw.js')
+        .then(reg => console.log('[PWA] Service Worker 注册成功:', reg.scope))
+        .catch(err => console.warn('[PWA] Service Worker 注册失败:', err));
+    });
+  }
+</script>
+
+</body>
+</html>

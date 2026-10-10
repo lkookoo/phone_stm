@@ -1,0 +1,50 @@
+# 品种配置
+
+crypto:
+  BTC/USDT:
+    asset_class: crypto
+    primary: okx
+    backup: [binance, coinbase, kraken]
+    okx_symbol: BTC-USDT
+    binance_symbol: BTCUSDT
+    coinbase_symbol: BTC-USD
+    kraken_symbol: XBT/USD
+
+  ETH/USDT:
+    asset_class: crypto
+    primary: okx
+    backup: [binance, coinbase, kraken]
+    okx_symbol: ETH-USDT
+    binance_symbol: ETHUSDT
+    coinbase_symbol: ETH-USD
+    kraken_symbol: ETH/USD
+
+  SOL/USDT:
+    asset_class: crypto
+    primary: okx
+    backup: [binance, coinbase, kraken]
+    okx_symbol: SOL-USDT
+    binance_symbol: SOLUSDT
+    coinbase_symbol: SOL-USD
+    kraken_symbol: SOL/USD
+
+us_index:
+  SPX:
+    asset_class: us_index
+    primary: sina             # ★ 从 yahoo 改成 sina
+    backup: [yahoo]
+    yahoo_symbol: "^GSPC"
+    sina_symbol: "int_sp500"
+    display_name: "S&P 500"
+
+  NDX:
+    asset_class: us_index
+    primary: sina             # ★ 从 yahoo 改成 sina
+    backup: [yahoo]
+    yahoo_symbol: "^NDX"
+    sina_symbol: "int_nasdaq"
+    display_name: "Nasdaq-100"
+
+timeframes:
+  crypto: [1m, 5m, 15m, 30m, 1h, 4h, 1d, 1w]
+  us_index: [5m, 15m, 30m, 1h, 4h, 1d, 1w]

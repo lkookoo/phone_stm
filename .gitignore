@@ -1,0 +1,46 @@
+﻿# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+.Python
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# ---- 本地数据 ----
+data/
+*.db
+*.sqlite
+*.db-journal
+x1_data.db
+
+# ---- 本地环境 ----
+.env
+.env.production
+.env.local
+!.env.example
+
+# ---- 日志 / 调试文件 ----
+*.log
+logs/
+
+# ---- IDE ----
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ---- 系统 ----
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---- 临时 ----
+*.tmp
+*.bak
+~*
