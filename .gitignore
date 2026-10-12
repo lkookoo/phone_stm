@@ -44,3 +44,17 @@ desktop.ini
 *.tmp
 *.bak
 ~*
+# ---- 临时 / 调试 ----
+*.json
+!frontend/manifest.webmanifest
+!package.json
+!tsconfig.json
+show.py
+chk.py
+dbg.py
+clean*.py
+diag*.py
+yamlchk.py
+yfchk.py
+dbchk.py
+*_chk.py
