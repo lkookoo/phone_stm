@@ -1,4 +1,4 @@
-# main.py
+# app/main.py
 import asyncio
 import os
 from pathlib import Path
@@ -31,6 +31,35 @@ from app.api import (
 
 
 app = FastAPI(title="X1.0 Market Monitor")
+
+
+# ============================================================
+# ★ 屏蔽 Windows asyncio 已知噪音
+# ============================================================
+
+def _install_silent_exception_handler():
+    """
+    Windows ProactorEventLoop 在连接被强制重置时会抛出
+    `AttributeError: 'ClientConnection' object has no attribute 'recv_messages'`，
+    这是 websockets 库 + Windows asyncio 的已知问题，不影响功能。
+    这里静默忽略它，其它异常走默认处理。
+    """
+    try:
+        loop = asyncio.get_event_loop()
+        orig = loop.get_exception_handler()
+
+        def _handler(loop, context):
+            exc = context.get("exception")
+            if exc is not None and "recv_messages" in str(exc):
+                return
+            if orig is not None:
+                orig(loop, context)
+            else:
+                loop.default_exception_handler(context)
+
+        loop.set_exception_handler(_handler)
+    except Exception:
+        pass
 
 
 # ============================================================
@@ -191,7 +220,6 @@ async def on_kline(candle):
         if not candle.is_closed:
             return
 
-        # ★ 收盘 K 线写入 SQLite（新浪本地合成的 K 线需要落盘）
         try:
             from app.storage import repository as repo
             await repo.save_candles_bulk([candle])
@@ -279,7 +307,7 @@ async def on_kline(candle):
 
 
 # ============================================================
-# REST 拉取
+# REST 拉取（带重试）
 # ============================================================
 
 async def _fetch_klines_with_retry(provider, raw_sym, tf, start, end, retries=3):
@@ -298,6 +326,10 @@ async def _fetch_klines_with_retry(provider, raw_sym, tf, start, end, retries=3)
 # ============================================================
 
 async def subscribe_symbol_with_failover(sym: str, cfg: dict):
+    """
+    加密品种 failover。
+    ★ 超时 30 秒：OKX 首次连接握手需要时间，前几秒可能收不到 tick。
+    """
     providers = x1_state["providers"]
     candidates = [cfg["primary"]] + list(cfg.get("backup", []))
     candidates = [c for c in candidates if c in providers]
@@ -331,12 +363,12 @@ async def subscribe_symbol_with_failover(sym: str, cfg: dict):
                 ))
 
             try:
-                await asyncio.wait_for(got_data.wait(), timeout=15.0)
+                await asyncio.wait_for(got_data.wait(), timeout=30.0)
                 print(f"[failover] {sym}: 源 {source_name} 工作正常 ✅")
                 x1_state["active_source"][sym] = source_name
                 return
             except asyncio.TimeoutError:
-                print(f"[failover] {sym}: 源 {source_name} 15 秒无数据，切换下一个 ❌")
+                print(f"[failover] {sym}: 源 {source_name} 30 秒无数据，切换下一个 ❌")
                 for t in bg_tasks:
                     t.cancel()
                 continue
@@ -350,10 +382,14 @@ async def subscribe_symbol_with_failover(sym: str, cfg: dict):
 
 
 # ============================================================
-# 美股订阅（Yahoo 主，Sina 备用）
+# 美股订阅（新浪主，Yahoo 备用）
 # ============================================================
 
 async def subscribe_us_symbol(sym: str, cfg: dict):
+    """
+    美股订阅。
+    ★ 超时 25 秒：新浪每 15 秒轮询一次，第一次 tick 可能 15 秒后才到。
+    """
     providers = x1_state["providers"]
     candidates = [cfg["primary"]] + list(cfg.get("backup", []))
     candidates = [c for c in candidates if c in providers]
@@ -384,16 +420,15 @@ async def subscribe_us_symbol(sym: str, cfg: dict):
                 ))
 
             try:
-                await asyncio.wait_for(got_data.wait(), timeout=10.0)
+                await asyncio.wait_for(got_data.wait(), timeout=25.0)
                 print(f"[us] {sym}: 源 {source_name} 工作正常 ✅")
                 x1_state["active_source"][sym] = source_name
                 return
             except asyncio.TimeoutError:
-                print(f"[us] {sym}: 源 {source_name} 10 秒无数据，切换下一个 ❌")
+                print(f"[us] {sym}: 源 {source_name} 25 秒无数据，切换下一个 ❌")
                 for t in bg_tasks:
                     t.cancel()
                 continue
-
         except Exception as e:
             print(f"[us] {sym}: 源 {source_name} 异常 {type(e).__name__} {e}")
             for t in bg_tasks:
@@ -404,16 +439,11 @@ async def subscribe_us_symbol(sym: str, cfg: dict):
 
 
 # ============================================================
-# 历史数据预加载
+# 历史数据预加载（用 primary 源）
 # ============================================================
 
 async def _preload_crypto_history():
     from app.storage import repository as repo
-
-    provider = x1_state["providers"].get("binance")
-    if not provider:
-        print("[preload] ❌ 没有 binance provider")
-        return
 
     plan = {
         "1m":  timedelta(days=3),
@@ -429,8 +459,16 @@ async def _preload_crypto_history():
     print(f"[preload] 开始处理 {len(crypto)} 个币种")
 
     for sym, cfg in crypto.items():
-        binance_sym = cfg.get("binance_symbol", sym.replace("/", ""))
+        primary = cfg.get("primary", "okx")
+        provider = x1_state["providers"].get(primary)
+        raw_sym = cfg.get(f"{primary}_symbol", sym)
+
+        if not provider:
+            print(f"[preload] {sym}: ❌ 无 provider {primary}")
+            continue
+
         agg = x1_state["aggregator"]
+        print(f"[preload] {sym}: 用 {primary} ({raw_sym})")
 
         for tf, span in plan.items():
             try:
@@ -442,20 +480,26 @@ async def _preload_crypto_history():
                     if latest_ts.tzinfo is None:
                         latest_ts = latest_ts.replace(tzinfo=timezone.utc)
                     start = latest_ts - timedelta(minutes=5)
-                    candles_new = await _fetch_klines_with_retry(
-                        provider, binance_sym, tf, start, end
-                    )
-                    candles_new = [_to_std(c) for c in candles_new]
+                    try:
+                        candles_new = await _fetch_klines_with_retry(
+                            provider, raw_sym, tf, start, end
+                        )
+                    except Exception as e:
+                        print(f"[preload] {sym} {tf} 增量失败: {type(e).__name__}")
+                        candles_new = []
                     if candles_new:
                         await repo.save_candles_bulk(candles_new)
                     candles = await repo.load_candles(sym, tf, limit=5000)
                     print(f"[preload] {sym} {tf}: 库 {count} + 增量 {len(candles_new)} → {len(candles)}")
                 else:
                     start = end - span
-                    candles = await _fetch_klines_with_retry(
-                        provider, binance_sym, tf, start, end
-                    )
-                    candles = [_to_std(c) for c in candles]
+                    try:
+                        candles = await _fetch_klines_with_retry(
+                            provider, raw_sym, tf, start, end
+                        )
+                    except Exception as e:
+                        print(f"[preload] {sym} {tf} 首次失败: {type(e).__name__}")
+                        candles = []
                     print(f"[preload] {sym} {tf}: 首次全量 {len(candles)}，写入数据库")
                     if candles:
                         await repo.save_candles_bulk(candles)
@@ -472,24 +516,19 @@ async def _preload_crypto_history():
                 print(f"[preload] {sym} {tf} ❌ {type(e).__name__}: {e}")
                 traceback.print_exc()
 
+
 async def _preload_us_history():
-    """
-    美股指数只拉日K（1d）。
-    分钟级数据完全由 Sina 本地合成，避免 Yahoo 脏数据污染。
-    """
     from app.storage import repository as repo
 
     providers = x1_state["providers"]
-    plan = [
-        ("1d",  timedelta(days=730)),
-    ]
+    plan = [("1d", timedelta(days=730))]
 
     agg = x1_state["aggregator"]
     us_index = SYMBOLS.get("us_index", {})
     print(f"[us-preload] 开始处理 {len(us_index)} 个指数（仅 1d）")
 
     for sym, cfg in us_index.items():
-        candidates = [cfg.get("primary", "yahoo")] + list(cfg.get("backup", []))
+        candidates = [cfg.get("primary", "sina")] + list(cfg.get("backup", []))
         candidates = [c for c in candidates if c in providers]
 
         for tf, span in plan:
@@ -532,7 +571,6 @@ async def _preload_us_history():
                 print(f"[us-preload] {sym} {tf} ❌ {type(e).__name__}: {e}")
                 traceback.print_exc()
                 await asyncio.sleep(5)
-
 
 
 async def preload_history():
@@ -628,6 +666,9 @@ async def start_subscriptions():
 
 @app.on_event("startup")
 async def startup():
+    # ★ 静默 Windows asyncio 的 recv_messages 噪音
+    _install_silent_exception_handler()
+
     print("=" * 60)
     print("[startup] 开始执行 startup()")
     print("=" * 60)

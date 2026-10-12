@@ -1,10 +1,4 @@
 # Dockerfile - X1.0 Market Monitor for Hugging Face Spaces
-#
-# HF Spaces 要求：
-#   - 监听端口 7860
-#   - 非 root 用户（uid=1000）
-#   - 免费层无持久化存储
-
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -18,21 +12,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         curl \
     && rm -rf /var/lib/apt/lists/*
 
-# HF Spaces 要求 uid=1000 用户
 RUN useradd -m -u 1000 user
 
 WORKDIR /app
 
-# 依赖先装，利用 layer cache
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
-# 拷贝应用代码
+# 拷贝 app（含 app/main.py）
 COPY --chown=user:user app/ ./app/
+# 拷贝前端
 COPY --chown=user:user frontend/ ./frontend/
+# 拷贝入口脚本
 COPY --chown=user:user run.py .
-COPY --chown=user:user main.py .
+# 拷贝 HF 环境变量
 COPY --chown=user:user .env.hf ./.env
 
 USER user
